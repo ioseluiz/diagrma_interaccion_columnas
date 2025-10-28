@@ -29,8 +29,13 @@ def main():
     for x in col_1.rebars:
         print(f"layer: {x.layer}, pos_x: {x.pos_x}, pos_y: {x.pos_y}")
 
-    print(col_1.pn_1, col_1.mn_1)
-    print(col_1.pn_2, col_1.mn_2)
+    # print(col_1.pn_1, col_1.mn_1)
+    # print(col_1.pn_2, col_1.mn_2)
+
+    for x in col_1.points:
+        print(x)
+    
+    col_1.plot_diagram()
 
 
 if __name__ == "__main__":

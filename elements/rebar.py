@@ -7,7 +7,7 @@ REBAR_INFO = [
     {"number": "#6", "diameter": 1.905, "area": 2.84},
     {"number": "#7", "diameter": 2.2225, "area": 3.87},
     {"number": "#8", "diameter": 2.865, "area": 5.1},
-    {"number": "#9", "diameter": "3.226", "area": 6.45},
+    {"number": "#9", "diameter": 3.226, "area": 6.45},
 ]
 
 

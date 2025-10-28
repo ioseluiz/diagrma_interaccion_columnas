@@ -1,6 +1,10 @@
 from .rebar import Rebar
 from .material import ConcreteMaterial, SteelMaterial
 from .stirrup import Stirrup
+from utils.utils import get_beta
+
+import matplotlib.pyplot as plt
+
 
 
 class RectangularColumn:
@@ -28,6 +32,7 @@ class RectangularColumn:
         self.rebar_material = rebar_material
         self.tie_rebar = tie_rebar
         self.stirrrup_material = tie_material
+        self.points = []
 
         # Stirrup Rebar
         self.stirrup = Stirrup(self.tie_rebar, self.stirrrup_material)
@@ -38,12 +43,28 @@ class RectangularColumn:
 
         # Calculate effective depth
         self.d = self.calculate_effective_depth()
+        
+        self.phi_pn_max = 0.0 # Inicializar (en kg)
 
         # Diagram Points
-        self.diagram_points = []  # List of tuples of points
-
+        # Punto 1: Compresión Pura
         self.calculate_point_1()
-        self.calculate_point_2()
+        self.points.append((self.mn_1, self.pn_1, 0.65))
+        
+        # Calcular Pn,max (ACI 318-19, 22.4.2.1)
+        # phi_Pn_max = 0.80 * (phi * Pn0) (en kg)
+        self.phi_pn_max = 0.80 * (0.65 * self.pn_1)
+        
+        # Puntos Intermedios (c variando)
+        self.calculate_variable_points()
+        
+        # Punto Final: Tensión Pura
+        self.calculate_point_tension()
+        self.points.append((self.mn_tension, self.pn_tension, 0.90))
+        
+        # Ordenar todos los puntos por Pn (de mayor a menor)
+        self.points.sort(key=lambda p: p[1], reverse=True)
+
 
     def generate_rebars(self):
         # Generic_rebar
@@ -108,6 +129,39 @@ class RectangularColumn:
         for rebar in [x for x in self.rebars if x.layer == layer]:
             total_area += rebar.area
         return total_area
+    
+    def get_layer_pos_y(self, layer_number):
+        return [x.pos_y for x in self.rebars if layer_number == x.layer][0]
+    
+    def get_layer_position(self, c: float, layer_pos_y: float):
+        
+        if c > layer_pos_y:
+            tipo ="compresion"
+        else:
+            tipo = "tension"
+        return tipo
+    
+    def get_layer_pos_centroid(self, pos_centroid, pos_y):
+        if pos_centroid > pos_y:
+            # Clockwise
+            type = "arriba_centroide"
+        else:
+            type = "abajo_centroide"
+        return type
+    
+    def get_es(self, c: float, layer_pos_y: float):
+        if c > layer_pos_y:
+            # compresion
+            es = 0.003 * (c - layer_pos_y / c)
+            if es > 0.002:
+                es = 0.002
+        else:
+            # tension
+            es = 0.003 * (layer_pos_y - c) / c
+            if es > 0.002:
+                es = 0.002
+        return es
+
 
     def calculate_effective_depth(self):
         # Generic_rebar
@@ -125,56 +179,165 @@ class RectangularColumn:
         return total_area
 
     def calculate_point_1(self):
-        # Neutral Axis in the infinite
-        ## Iterate through r2_bars (vertical)
-        cc = (
-            0.85
-            * self.concrete_material.fc
-            * (self.b * self.h - self.get_total_rebar_area())
-        )
-        sum_p = 0
-        for i in range(1, self.r3_bars + 1):
-            # fs
-            fs = self.rebar_material.fy
+        # Punto 1: Compresión Pura (c = infinito)
+        # (ACI 318-19, Ecuación 22.4.2.2)
+        
+        ag = self.b * self.h
+        ast = self.get_total_rebar_area()
+        fc = self.concrete_material.fc
+        fy = self.rebar_material.fy
+        
+        # Fuerza del Concreto (restando el área de acero)
+        cc = 0.85 * fc * (ag - ast)
+        
+        # Fuerza del Acero (Todo el acero fluye)
+        sum_p = ast * fy
 
-            # Total Rebar Area in the layer
-            rebar_layer_area = self.get_layer_area(i)
-            print(f"layer: {i}, area: {rebar_layer_area}")
-            sum_p += rebar_layer_area * fs
+        # Carga Nominal (Pn0)
+        self.pn_1 = cc + sum_p
+        # Momento Nominal
+        self.mn_1 = 0.0
 
-        # Nominal Axial Load
-        pn = cc + sum_p
-        # Nominal Moment
-        self.pn_1 = pn
-        self.mn_1 = 0
+    
+    def calculate_variable_points(self):
+        # Deformación unitaria de fluencia del acero
+        ey = self.rebar_material.fy / self.rebar_material.Es
+        
+        # Dist. al acero extremo en tensión (desde fibra superior)
+        d_t = self.h - self.get_layer_pos_y(1) 
+        
+        # Iterar la posición del eje neutro 'c'
+        for x in range(101):
+            c = self.h - (x / 100.0) * self.h
+            
+            if c < 1e-5:
+                continue
+                
+            # --- CÁLCULO DE PHI ---
+            et = 0.003 * (d_t - c) / c
+            
+            phi = 0.65 # Default para Compresión
+            
+            if et > ey:
+                if et >= 0.005: # Tensión
+                    phi = 0.90
+                else: # Transición
+                    phi = 0.65 + 0.25 * (et - ey) / (0.005 - ey)
 
-    def calculate_point_2(self):
-        # Neutral axis in the bottom of the section
-        # Calculo de Fuerza de Compresion del concreto
-        cc = (
-            0.85
-            * self.concrete_material.fc
-            * (self.b * self.d - self.get_total_rebar_area())
-        )
-        sump = 0
-        sum_mn = 0
-        # Nunca es puede ser mayor a 0.002
-        for i in range(1, self.r3_bars + 1):
-            rebar_layer_area = self.get_layer_area(i)
-            pos_y = [x.pos_y for x in self.rebars if i == x.layer][0]
-            es = 0.003 * (pos_y) / self.h
-            if es >= 0.002:
-                es = 0.002
-            fs = es * self.rebar_material.Es
-            ps = fs * rebar_layer_area
-            sump += ps
-            if pos_y >= self.h / 2:
-                dist = pos_y - self.h / 2
+            beta = get_beta(self.concrete_material.fc)
+            a = c * beta 
+            
+            if a > self.h:
+                a = self.h
+            
+            Ccomp = 0.85 * self.concrete_material.fc * self.b * a
+            arm_c = (self.h / 2.0) - (a / 2.0) 
+            Mn_c = Ccomp * arm_c
+            
+            sum_ps = 0.0
+            sum_mn_s = 0.0
+            
+            for i in range(1, self.r3_bars + 1):
+                layer_pos_y = self.get_layer_pos_y(i)
+                area = self.get_layer_area(i)
+                d_prime = self.h - layer_pos_y 
+                
+                es = 0.003 * (c - d_prime) / c
+                
+                fs = es * self.rebar_material.Es
+                if fs > self.rebar_material.fy:
+                    fs = self.rebar_material.fy
+                elif fs < -self.rebar_material.fy:
+                    fs = -self.rebar_material.fy
+                
+                ps = area * fs
+                arm_s = (self.h / 2.0) - d_prime
+                Mn_s = ps * arm_s
+                
+                sum_ps += ps
+                sum_mn_s += Mn_s
+
+            pn = Ccomp + sum_ps
+            mn = Mn_c + sum_mn_s
+            
+            self.points.append((mn, pn, phi))
+
+    def calculate_point_tension(self):
+        pn = -self.get_total_rebar_area() * self.rebar_material.fy
+        mn = 0.0
+        
+        self.pn_tension = pn
+        self.mn_tension = mn
+
+
+    def plot_diagram(self, file_name="interaction_diagram.png"):
+        """
+        Grafica el diagrama de interacción Pn-Mn (Nominal) y phi*Pn-phi*Mn (Diseño).
+        Aplica el límite de Pn,max del ACI 318-19.
+        Convierte las unidades a Ton y Ton-m para el gráfico.
+        """
+        
+        # <-- INICIO MODIFICACIÓN: Factores de conversión
+        p_factor = 1000.0  # kg a Ton
+        m_factor = 100000.0 # kg-cm a Ton-m
+        # <-- FIN MODIFICACIÓN
+        
+
+        # 1. Separar y CONVERTIR los datos
+        mn_nominal = [p[0] / m_factor for p in self.points]
+        pn_nominal = [p[1] / p_factor for p in self.points]
+        
+        mn_factored = [(p[0] * p[2]) / m_factor for p in self.points] # phi * Mn
+        pn_factored = [(p[1] * p[2]) / p_factor for p in self.points] # phi * Pn
+        
+        # <-- INICIO MODIFICACIÓN: Convertir el límite Pn,max a Ton
+        phi_pn_max_ton = self.phi_pn_max / p_factor
+        
+        # Aplicar el límite phi*Pn,max (en Ton)
+        pn_factored_capped = []
+        for pn_val in pn_factored:
+            if pn_val > phi_pn_max_ton:
+                pn_factored_capped.append(phi_pn_max_ton)
             else:
-                dist = -(self.h / 2 - pos_y)
-            sum_mn += ps * dist
-            print(es, fs, ps)
-        self.pn_2 = cc + sump
+                pn_factored_capped.append(pn_val)
+        
+        pn_factored = pn_factored_capped 
+        # <-- FIN MODIFICACIÓN
 
-        # calculate nominal moment
-        self.mn_2 = cc * (self.h / 2 - self.d / 2) + sum_mn
+        # 2. Añadir el lado simétrico (ya están en Ton y Ton-m)
+        
+        # --- Nominal ---
+        mn_sym_nominal = [-x for x in mn_nominal if x != 0]
+        pn_sym_nominal = [y for x, y in zip(mn_nominal, pn_nominal) if x != 0]
+        mn_full_nominal = mn_sym_nominal[::-1] + mn_nominal
+        pn_full_nominal = pn_sym_nominal[::-1] + pn_nominal
+        
+        # --- Diseño (Factored) ---
+        mn_sym_factored = [-x for x in mn_factored if x != 0]
+        pn_sym_factored = [y for x, y in zip(mn_factored, pn_factored) if x != 0] 
+        mn_full_factored = mn_sym_factored[::-1] + mn_factored
+        pn_full_factored = pn_sym_factored[::-1] + pn_factored
+
+        # 3. Crear el gráfico
+        plt.figure(figsize=(10, 8))
+        
+        plt.plot(mn_full_nominal, pn_full_nominal, marker='.', linestyle='-', label="Resistencia Nominal (Pn-Mn)")
+        plt.plot(mn_full_factored, pn_full_factored, marker='.', linestyle='--', label="Resistencia de Diseño ($\phi$Pn-$\phi$Mn) ACI 318-19", color='red')
+        
+        # 4. Títulos y etiquetas <-- MODIFICADO
+        plt.title(f"Diagrama de Interacción (Columna {self.b} x {self.h} cm)")
+        plt.xlabel("Momento, M (Ton-m)")
+        plt.ylabel("Carga Axial, P (Ton)")
+        
+        # 5. Visualización
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.axhline(0, color='black', linewidth=0.5)
+        plt.axvline(0, color='black', linewidth=0.5)
+        plt.legend()
+        
+        # 6. Guardar
+        plt.savefig(file_name)
+        plt.close()
+        
+        return file_name
+            
