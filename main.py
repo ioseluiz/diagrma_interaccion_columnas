@@ -1,5 +1,6 @@
 from elements.column import RectangularColumn
 from elements.material import ConcreteMaterial, SteelMaterial
+from elements.load import PuntoDeCarga
 
 
 def main():
@@ -26,16 +27,18 @@ def main():
         tie_material=rebar_grade_40,
     )
 
-    for x in col_1.rebars:
-        print(f"layer: {x.layer}, pos_x: {x.pos_x}, pos_y: {x.pos_y}")
+    # --- INICIO MODIFICACIÓN: CREAR PUNTOS DE CARGA ---
+    # Unidades: Pu en Toneladas, Mu en Ton-m
+    carga_combo_1 = PuntoDeCarga(name="CM-1 (1.4D+1.7L)", Pu=220.5, Mu=15.2)
+    carga_combo_2 = PuntoDeCarga(name="CM-2 (Max M)", Pu=110.0, Mu=35.8)
+    carga_combo_3 = PuntoDeCarga(name="CM-3 (Con Sismo)", Pu=85.0, Mu=-42.0)
 
-    # print(col_1.pn_1, col_1.mn_1)
-    # print(col_1.pn_2, col_1.mn_2)
+    cargas_para_graficar = [carga_combo_1, carga_combo_2, carga_combo_3]
 
-    for x in col_1.points:
-        print(x)
-    
-    col_1.plot_diagram()
+    # Generar el gráfico y pasar los puntos de carga
+    col_1.plot_diagram(file_name="diagrama_col_1.png", load_points=cargas_para_graficar)
+
+    print("Diagrama 'diagrama_col_1.png' generado exitosamente con puntos de carga.")
 
 
 if __name__ == "__main__":
