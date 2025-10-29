@@ -5,6 +5,7 @@ from utils.utils import get_beta
 from .load import PuntoDeCarga
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import numpy as np
 
 
@@ -266,173 +267,170 @@ class RectangularColumn:
         self.pn_tension = pn
         self.mn_tension = mn
 
+    # En column.py, dentro de la clase RectangularColumn
+
+    def plot_schematic_on_ax(self, ax_schemat):
+        """
+        Dibuja el esquema de la sección transversal de la columna
+        en un 'Axes' de Matplotlib proporcionado.
+        """
+        ax_schemat.clear()
+        ax_schemat.set_aspect("equal")
+        ax_schemat.set_axis_off()  # Oculta los ejes X e Y
+
+        # Mismo color de fondo que la GUI
+        ax_schemat.set_facecolor("#d0d0d0")
+
+        # 1. Dibujar el Concreto
+        concreto = patches.Rectangle(
+            (0, 0),
+            self.b,
+            self.h,
+            fill=True,
+            facecolor="#d0d0d0",
+            edgecolor="#a0a0a0",
+            lw=1,
+        )
+        ax_schemat.add_patch(concreto)
+
+        # 2. Dibujar el Estribo
+        stirrup_b = self.b - 2 * self.cover
+        stirrup_h = self.h - 2 * self.cover
+        estribo = patches.Rectangle(
+            (self.cover, self.cover),
+            stirrup_b,
+            stirrup_h,
+            fill=False,
+            edgecolor="#505050",
+            lw=2,
+        )
+        ax_schemat.add_patch(estribo)
+
+        # 3. Dibujar las Barras de Refuerzo
+        for rebar in self.rebars:
+            barra = patches.Circle(
+                (rebar.pos_x, rebar.pos_y),
+                rebar.diameter / 2,
+                fill=True,
+                facecolor="#303030",
+                edgecolor="#101010",
+                lw=0.5,
+            )
+            ax_schemat.add_patch(barra)
+
+        # 4. Ajustar los límites del dibujo
+        margin = self.cover * 0.5
+        ax_schemat.set_xlim(-margin, self.b + margin)
+        ax_schemat.set_ylim(-margin, self.h + margin)
+
     def plot_diagram(
         self,
+        ax=None,
         file_name="interaction_diagram.png",
         load_points: list[PuntoDeCarga] = None,
     ):
         """
         Grafica el diagrama de interacción Pn-Mn (Nominal) y phi*Pn-phi*Mn (Diseño).
-        Aplica el límite de Pn,max del ACI 318-19.
-        Convierte las unidades a Ton y Ton-m para el gráfico.
-
-        Args:
-            file_name (str): Nombre del archivo de salida.
-            load_points (list[PuntoDeCarga], optional): Lista de puntos de carga
-                                                       (Pu en Ton, Mu en Ton-m) a graficar.
+        Si se proporciona 'ax' (un Axes de Matplotlib), dibuja sobre él.
+        Si 'ax' es None, crea una nueva figura y la guarda en 'file_name'.
         """
 
+        # Determina si se está creando un nuevo gráfico o dibujando en uno existente
+        if ax is None:
+            # MODIFICACIÓN: Aseguramos que la figura tenga el tamaño correcto
+            fig = plt.figure(figsize=(12, 8))
+            ax = fig.add_subplot(111)
+            save_and_close = True
+        else:
+            fig = ax.get_figure()
+            save_and_close = False
+
+        # ... (Factores de conversión y CÁLCULOS de mn_full_nominal, pn_full_nominal, etc.
+        #      Tu código existente va aquí) ...
+
+        # --- (Tu código de cálculo de Pn, Mn, phi, etc. va aquí) ---
         # Factores de conversión
         p_factor = 1000.0  # kg a Ton
         m_factor = 100000.0  # kg-cm a Ton-m
 
-        # 1. Separar y CONVERTIR los datos (de kg, kg-cm a Ton, Ton-m)
+        # 1. Separar y CONVERTIR los datos
         mn_nominal = [p[0] / m_factor for p in self.points]
         pn_nominal = [p[1] / p_factor for p in self.points]
-
         mn_factored = [(p[0] * p[2]) / m_factor for p in self.points]  # phi * Mn
         pn_factored = [(p[1] * p[2]) / p_factor for p in self.points]  # phi * Pn
-
-        # Guardar los valores de phi para las anotaciones
         phis = [p[2] for p in self.points]
 
-        # Convertir el límite Pn,max a Ton
+        # Aplicar el límite phi*Pn,max
         phi_pn_max_ton = self.phi_pn_max / p_factor
-
-        # Aplicar el límite phi*Pn,max (en Ton)
         pn_factored_capped = []
         for pn_val in pn_factored:
-            if pn_val > phi_pn_max_ton:
-                pn_factored_capped.append(phi_pn_max_ton)
-            else:
-                pn_factored_capped.append(pn_val)
-
+            pn_factored_capped.append(min(pn_val, phi_pn_max_ton))
         pn_factored = pn_factored_capped
 
-        # 2. Añadir el lado simétrico (ya están en Ton y Ton-m)
-
-        # --- Nominal ---
+        # 2. Añadir el lado simétrico
+        # Nominal
         mn_sym_nominal = [-x for x in mn_nominal if x != 0]
         pn_sym_nominal = [y for x, y in zip(mn_nominal, pn_nominal) if x != 0]
         mn_full_nominal = mn_sym_nominal[::-1] + mn_nominal
         pn_full_nominal = pn_sym_nominal[::-1] + pn_nominal
 
-        # --- Diseño (Factored) ---
+        # Diseño (Factored)
         mn_sym_factored = [-x for x in mn_factored if x != 0]
         pn_sym_factored = [y for x, y in zip(mn_factored, pn_factored) if x != 0]
         mn_full_factored = mn_sym_factored[::-1] + mn_factored
         pn_full_factored = pn_sym_factored[::-1] + pn_factored
+        # --- (Fin del código de cálculo) ---
 
-        # 3. Crear el gráfico
-        plt.figure(
-            figsize=(12, 8)
-        )  # MODIFICACIÓN: Ancho aumentado (12) para dar espacio a la leyenda
-
-        # MODIFICACIÓN: Se quitaron markers y se usa linestyle='-' (sólido)
-        plt.plot(
+        # 3. Crear el gráfico (usando 'ax')
+        ax.plot(
             mn_full_nominal,
             pn_full_nominal,
             linestyle="-",
             label="Resistencia Nominal (Pn-Mn)",
         )
-        plt.plot(
+        ax.plot(
             mn_full_factored,
             pn_full_factored,
             linestyle="-",
-            label="Resistencia de Diseño ($\phi$Pn-$\phi$Mn) ACI 318-19",
+            label="Resistencia de Diseño ($\phi$Pn-$\phi$Mn)",
             color="red",
         )
 
         # 4. Títulos y etiquetas
-        bars = 2 * self.r3_bars + 2 * (self.r2_bars - 2)
-        plt.title(
-            f"Diagrama de Interacción (Columna {self.b} x {self.h} cm) - {bars}{self.rebar_number}"
+        cant_rebar = 2 * self.r3_bars + 2 * (self.r2_bars - 2)
+        ax.set_title(
+            f"Diagrama de Interacción (Columna {self.b} x {self.h} cm - {cant_rebar}{self.rebar_number})"
         )
-        plt.xlabel("Momento, M (Ton-m)")
-        plt.ylabel("Carga Axial, P (Ton)")
+        ax.set_xlabel("Momento, M (Ton-m)")
+        ax.set_ylabel("Carga Axial, P (Ton)")
 
         # 5. Visualización
-        plt.grid(True, linestyle="--", alpha=0.7)
-        plt.axhline(0, color="black", linewidth=0.5)
-        plt.axvline(0, color="black", linewidth=0.5)
+        ax.grid(True, linestyle="--", alpha=0.7)
+        ax.axhline(0, color="black", linewidth=0.5)
+        ax.axvline(0, color="black", linewidth=0.5)
 
-        # --- INICIO MODIFICACIÓN: ANOTACIONES DE PHI ---
-        # Usamos los datos antes de hacerlos simétricos
-        np_phis = np.array(phis)
+        # ... (Tu código de anotaciones de PHI va aquí) ...
 
-        # Zona de Compresión (phi = 0.65)
-        idx_comp = np.where(np_phis == 0.65)[0]
-        if len(idx_comp) > 0:
-            # Tomamos un punto intermedio en la zona de compresión
-            comp_point_idx = idx_comp[len(idx_comp) // 4]
-            x = mn_factored[comp_point_idx] * 1.05  # Ligero offset
-            y = pn_factored[comp_point_idx]
-            if x > 0:  # Solo anotar en el lado positivo
-                plt.text(
-                    x,
-                    y,
-                    "$\phi=0.65$",
-                    fontsize=8,
-                    color="gray",
-                    ha="left",
-                    va="center",
-                )
-
-        # Zona de Tensión (phi = 0.90)
-        idx_tens = np.where(np_phis == 0.90)[0]
-        if len(idx_tens) > 0:
-            # Tomamos un punto intermedio en la zona de tensión
-            tens_point_idx = idx_tens[len(idx_tens) // 2]
-            x = mn_factored[tens_point_idx] * 1.05  # Ligero offset
-            y = pn_factored[tens_point_idx]
-            if x > 0:  # Solo anotar en el lado positivo
-                plt.text(
-                    x,
-                    y,
-                    "$\phi=0.90$",
-                    fontsize=8,
-                    color="gray",
-                    ha="left",
-                    va="center",
-                )
-
-        # Zona de Transición (0.65 < phi < 0.90)
-        idx_trans = np.where((np_phis > 0.65) & (np_phis < 0.90))[0]
-        if len(idx_trans) > 0:
-            # Tomamos un punto intermedio en la zona de transición
-            trans_point_idx = idx_trans[len(idx_trans) // 2]
-            x = mn_factored[trans_point_idx] * 1.05  # Ligero offset
-            y = pn_factored[trans_point_idx]
-            if x > 0:  # Solo anotar en el lado positivo
-                plt.text(
-                    x,
-                    y,
-                    "Transición $\phi$",
-                    fontsize=8,
-                    color="gray",
-                    ha="left",
-                    va="center",
-                )
-        # --- FIN MODIFICACIÓN: ANOTACIONES DE PHI ---
-
-        # --- INICIO MODIFICACIÓN: GRAFICAR PUNTOS DE CARGA ---
+        # --- INICIO: SECCIÓN CRÍTICA PARA GRAFICAR CARGAS ---
+        # Esto asegura que los puntos de carga se dibujen.
         if load_points:
             for point in load_points:
+                # La etiqueta completa se usará en la leyenda
+                label = f"Carga: {point.name} (Pu={point.Pu} T, Mu={point.Mu} T-m)"
+
                 # Grafica el punto
-                plt.plot(
+                ax.plot(
                     point.Mu,
                     point.Pu,
                     "kx",
                     markersize=10,
                     markeredgewidth=3,
-                    # La etiqueta completa se usará en la leyenda
-                    label=f"Carga: {point.name} (Pu={point.Pu} T, Mu={point.Mu} T-m)",
+                    label=label,
                 )
 
-                # MODIFICACIÓN: El texto en el gráfico solo usa el nombre corto
-                # Asume que el nombre es "CM-1 (desc...)" -> "CM-1"
+                # Texto en el gráfico solo usa el nombre corto
                 short_name = point.name.split(" ")[0]
-                plt.text(
+                ax.text(
                     point.Mu,
                     point.Pu * 1.01,
                     f" {short_name}",
@@ -441,25 +439,46 @@ class RectangularColumn:
                     fontsize=10,
                     weight="bold",
                 )
-        # --- FIN MODIFICACIÓN ---
+        # --- FIN: SECCIÓN CRÍTICA ---
 
-        # MODIFICACIÓN: Mover la leyenda fuera del gráfico
-        # Coloca la leyenda fuera del área de ploteo, en la esquina superior derecha
-        # MODIFICACIÓN: Mover la leyenda fuera del gráfico
-        # Coloca la leyenda fuera del área de ploteo, en la esquina superior derecha
-        # Aumentamos un poco el valor de 'x' en bbox_to_anchor a 1.05 o 1.06
-        plt.legend(
+        # Mover la leyenda fuera del gráfico
+        ax.legend(
             bbox_to_anchor=(1.05, 1),
             loc="upper left",
             borderaxespad=0.0,
             fontsize="x-small",
-        )  # MODIFICACIÓN: fontsize a 'x-small'
+        )
 
-        # 6. Guardar
-        # MODIFICACIÓN: Eliminar plt.subplots_adjust y usar plt.tight_layout()
-        plt.tight_layout()  # <-- REEMPLAZA plt.subplots_adjust(left=0.1, right=0.75, top=0.9, bottom=0.1)
+        # --- INICIO DE LA MODIFICACIÓN ---
+        try:
+            # Añadir el esquema usando fig.add_axes
+            # Coordenadas relativas a la FIGURA [left, bottom, width, height]
+            # (0,0) es abajo-izquierda, (1,1) es arriba-derecha
 
-        plt.savefig(file_name)
-        plt.close()
+            # Puedes ajustar [0.77, 0.1, 0.2, 0.2] si es necesario
+            # 0.77 = 77% desde la izquierda (justo en el espacio que dejaremos)
+            # 0.1  = 10% desde abajo
+            # 0.2  = 20% de ancho
+            # 0.2  = 20% de alto
+            ax_schematic = fig.add_axes([0.77, 0.1, 0.2, 0.2])
 
-        return file_name
+            self.plot_schematic_on_ax(ax_schematic)
+
+        except Exception as e:
+            print(f"Advertencia: No se pudo dibujar el esquema. Error: {e}")
+        # --- FIN DE LA MODIFICACIÓN ---
+
+        # 6. Guardar o devolver
+        # --- MODIFICACIÓN: Reemplazar tight_layout() con subplots_adjust() ---
+        # Ajusta el gráfico principal para dejar espacio a la derecha (1.0 - 0.75 = 0.25)
+        # para la leyenda y el nuevo esquema.
+        fig.subplots_adjust(left=0.1, right=0.75, top=0.9, bottom=0.1)
+
+        if save_and_close:
+            # Ya no se necesita fig.tight_layout() aquí
+            fig.savefig(file_name)
+            plt.close(fig)
+            return file_name
+        else:
+            # Ya no se necesita fig.tight_layout() aquí
+            return fig
